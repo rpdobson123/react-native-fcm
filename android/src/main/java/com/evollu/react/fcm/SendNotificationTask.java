@@ -21,6 +21,7 @@ import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
+import com.facebook.react.HeadlessJsTaskService;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
 
@@ -223,14 +224,27 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
                         ReadableMap action = actions.getMap(a);
                         String actionTitle = action.getString("title");
                         String actionId = action.getString("id");
+                        Boolean preserve = action.hasKey("preserve") && action.getBoolean("preserve");
                         Intent actionIntent = new Intent();
-                        actionIntent.setClassName(mContext, intentClassName);
                         actionIntent.setAction("com.evollu.react.fcm." + actionId + "_ACTION");
                         actionIntent.putExtras(bundle);
+                        actionIntent.putExtra("notificationID", notificationID);
                         actionIntent.putExtra("_actionIdentifier", actionId);
+                        actionIntent.putExtra("preserve", preserve);
                         actionIntent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
-                        PendingIntent pendingActionIntent = PendingIntent.getActivity(mContext, notificationID, actionIntent,
-                                PendingIntent.FLAG_UPDATE_CURRENT);
+
+                        PendingIntent pendingActionIntent;
+
+                        if (action.hasKey("isBackgroundTask") && action.getBoolean("isBackgroundTask")) {
+                            actionIntent.setClass(mContext, NotificationTaskService.class);
+
+                            pendingActionIntent =  PendingIntent.getService(mContext, notificationID, actionIntent,
+                                    PendingIntent.FLAG_UPDATE_CURRENT);
+                        } else {
+                            actionIntent.setClassName(mContext, intentClassName);
+                            pendingActionIntent = PendingIntent.getActivity(mContext, notificationID, actionIntent,
+                                    PendingIntent.FLAG_UPDATE_CURRENT);
+                        }
 
                         notification.addAction(1, actionTitle, pendingActionIntent);
                     }
