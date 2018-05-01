@@ -9,19 +9,25 @@ import android.content.pm.ApplicationInfo;
 import android.content.res.Resources;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
 import android.graphics.Color;
+import android.graphics.Paint;
+import android.graphics.PorterDuff;
+import android.graphics.PorterDuffXfermode;
+import android.graphics.Rect;
+import android.graphics.RectF;
 import android.media.RingtoneManager;
 import android.net.Uri;
 import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.PowerManager;
+import android.provider.MediaStore;
 import android.support.v4.app.NotificationCompat;
 import android.support.v4.app.NotificationManagerCompat;
 import android.support.v4.content.LocalBroadcastManager;
 import android.util.Log;
 
-import com.facebook.react.HeadlessJsTaskService;
 import com.facebook.react.bridge.ReadableMap;
 import com.facebook.react.bridge.WritableArray;
 
@@ -36,39 +42,39 @@ import static com.facebook.react.common.ReactConstants.TAG;
 
 public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
     private static final long DEFAULT_VIBRATION = 300L;
-    
+
     private Context mContext;
     private Bundle bundle;
     private SharedPreferences sharedPreferences;
     private Boolean mIsForeground;
-    
+
     SendNotificationTask(Context context, SharedPreferences sharedPreferences, Boolean mIsForeground, Bundle bundle){
         this.mContext = context;
         this.bundle = bundle;
         this.sharedPreferences = sharedPreferences;
         this.mIsForeground = mIsForeground;
     }
-    
+
     protected Void doInBackground(Void... params) {
         try {
             String intentClassName = getMainActivityClassName();
             if (intentClassName == null) {
                 return null;
             }
-            
+
             if (bundle.getString("body") == null) {
                 return null;
             }
-            
+
             Resources res = mContext.getResources();
             String packageName = mContext.getPackageName();
-            
+
             String title = bundle.getString("title");
             if (title == null) {
                 ApplicationInfo appInfo = mContext.getApplicationInfo();
                 title = mContext.getPackageManager().getApplicationLabel(appInfo).toString();
             }
-            
+
             NotificationCompat.Builder notification = new NotificationCompat.Builder(mContext, bundle.getString("channel"))
             .setContentTitle(title)
             .setContentText(bundle.getString("body"))
@@ -83,11 +89,11 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
             if(android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP){
                 notification.setGroup(bundle.getString("group"));
             }
-            
+
             if (bundle.containsKey("ongoing") && bundle.getBoolean("ongoing")) {
                 notification.setOngoing(bundle.getBoolean("ongoing"));
             }
-            
+
             //priority
             String priority = bundle.getString("priority", "");
             switch(priority) {
@@ -103,7 +109,7 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
                 default:
                     notification.setPriority(NotificationCompat.PRIORITY_DEFAULT);
             }
-            
+
             //icon
             String smallIcon = bundle.getString("icon", "ic_launcher");
             int smallIconResId = res.getIdentifier(smallIcon, "mipmap", packageName);
@@ -113,51 +119,55 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
             if(smallIconResId != 0){
                 notification.setSmallIcon(smallIconResId);
             }
-            
+
             //large icon
             String largeIcon = bundle.getString("large_icon");
             if(largeIcon != null && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP){
-                if (largeIcon.startsWith("http://") || largeIcon.startsWith("https://")) {
+                if (largeIcon.startsWith("content://")) {
+                    Bitmap bitmap = MediaStore.Images.Media.getBitmap(mContext.getContentResolver(), Uri.parse(largeIcon));
+                    Bitmap roundedBitmap = getCircleBitmap(bitmap);
+                    notification.setLargeIcon(roundedBitmap);
+                } else if (largeIcon.startsWith("http://") || largeIcon.startsWith("https://")) {
                     Bitmap bitmap = getBitmapFromURL(largeIcon);
                     notification.setLargeIcon(bitmap);
                 } else {
                     int largeIconResId = res.getIdentifier(largeIcon, "mipmap", packageName);
                     Bitmap largeIconBitmap = BitmapFactory.decodeResource(res, largeIconResId);
-                    
+
                     if (largeIconResId != 0) {
                         notification.setLargeIcon(largeIconBitmap);
                     }
                 }
             }
-            
+
             //big text
             String bigText = bundle.getString("big_text");
             if(bigText != null){
                 notification.setStyle(new NotificationCompat.BigTextStyle().bigText(bigText));
             }
-            
+
             //picture
             String picture = bundle.getString("picture");
             if(picture!=null){
                 NotificationCompat.BigPictureStyle bigPicture = new NotificationCompat.BigPictureStyle();
-                
+
                 if (picture.startsWith("http://") || picture.startsWith("https://")) {
                     Bitmap bitmap = getBitmapFromURL(picture);
                     bigPicture.bigPicture(bitmap);
                 } else {
                     int pictureResId = res.getIdentifier(picture, "mipmap", packageName);
                     Bitmap pictureResIdBitmap = BitmapFactory.decodeResource(res, pictureResId);
-                    
+
                     if (pictureResId != 0) {
                         bigPicture.bigPicture(pictureResIdBitmap);
                     }
                 }
                 bigPicture.setBigContentTitle(title);
                 bigPicture.setSummaryText(bundle.getString("body"));
-                
+
                 notification.setStyle(bigPicture);
             }
-            
+
             //sound
             String soundName = bundle.getString("sound");
             if (soundName != null) {
@@ -172,17 +182,17 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
                     notification.setSound(Uri.parse("android.resource://" + packageName + "/" + soundResourceId));
                 }
             }
-            
+
             //color
             if (android.os.Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
                 notification.setCategory(NotificationCompat.CATEGORY_CALL);
-                
+
                 String color = bundle.getString("color");
                 if (color != null) {
                     notification.setColor(Color.parseColor(color));
                 }
             }
-            
+
             //vibrate
             if(bundle.containsKey("vibrate")){
                 long vibrate = Math.round(bundle.getDouble("vibrate", DEFAULT_VIBRATION));
@@ -192,30 +202,30 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
                     notification.setVibrate(null);
                 }
             }
-            
+
             //lights
             if (bundle.getBoolean("lights")) {
                 notification.setDefaults(NotificationCompat.DEFAULT_LIGHTS);
             }
-            
+
             if(bundle.containsKey("fire_date")) {
                 Log.d(TAG, "broadcast intent if it is a scheduled notification");
                 Intent i = new Intent("com.evollu.react.fcm.ReceiveLocalNotification");
                 i.putExtras(bundle);
                 LocalBroadcastManager.getInstance(mContext).sendBroadcast(i);
             }
-            
+
             if(!mIsForeground || bundle.getBoolean("show_in_foreground")){
                 Intent intent = new Intent();
                 intent.setClassName(mContext, intentClassName);
                 intent.addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP);
                 intent.putExtras(bundle);
                 intent.setAction(bundle.getString("click_action"));
-                
+
                 int notificationID = bundle.containsKey("id") ? bundle.getString("id", "").hashCode() : (int) System.currentTimeMillis();
                 PendingIntent pendingIntent = PendingIntent.getActivity(mContext, notificationID, intent,
                                                                         PendingIntent.FLAG_UPDATE_CURRENT);
-                
+
                 notification.setContentIntent(pendingIntent);
 
                 if (bundle.containsKey("android_actions")) {
@@ -249,9 +259,9 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
                         notification.addAction(1, actionTitle, pendingActionIntent);
                     }
                 }
-                
+
                 Notification info = notification.build();
-                
+
                 NotificationManagerCompat.from(mContext).notify(notificationID, info);
             }
 
@@ -275,7 +285,7 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
         }
         return null;
     }
-    
+
     private Bitmap getBitmapFromURL(String strURL) {
         try {
             URL url = new URL(strURL);
@@ -289,11 +299,31 @@ public class SendNotificationTask extends AsyncTask<Void, Void, Void> {
             return null;
         }
     }
-    
+
+    private Bitmap getCircleBitmap(Bitmap bitmap) {
+        final Bitmap output = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+        final Canvas canvas = new Canvas(output);
+        final int color = Color.RED;
+        final Paint paint = new Paint();
+        final Rect rect = new Rect(0, 0, bitmap.getWidth(), bitmap.getHeight());
+        final RectF rectF = new RectF(rect);
+
+        paint.setAntiAlias(true);
+        canvas.drawARGB(0, 0, 0, 0);
+        paint.setColor(color);
+        canvas.drawOval(rectF, paint);
+
+        paint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.SRC_IN));
+        canvas.drawBitmap(bitmap, rect, rect, paint);
+
+        bitmap.recycle();
+
+        return output;
+    }
+
     protected String getMainActivityClassName() {
         String packageName = mContext.getPackageName();
         Intent launchIntent = mContext.getPackageManager().getLaunchIntentForPackage(packageName);
         return launchIntent != null ? launchIntent.getComponent().getClassName() : null;
     }
 }
-
